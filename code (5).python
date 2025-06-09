@@ -1,0 +1,173 @@
+import re
+from typing import Dict, List, Tuple
+
+class MiniInterpreter:
+    def __init__(self):
+        self.vars: Dict[str, int] = {}
+
+    def eval_expr(self, expr: str) -> int:
+        """
+        Evaluate an expression supporting variables and integers.
+        Only simple expressions with +, -, *, /, parentheses allowed.
+        """
+        # Replace variables with their values
+        def repl_var(match):
+            var_name = match.group(0)
+            if var_name not in self.vars:
+                raise ValueError(f"Undefined variable '{var_name}'")
+            return str(self.vars[var_name])
+
+        expr_with_vals = re.sub(r'\b[a-zA-Z_]\w*\b', repl_var, expr)
+
+        try:
+            # Safely evaluate the arithmetic expression
+            # Only allow digits and operators in expression
+            if not re.fullmatch(r'[\d+\-*/() \t]+', expr_with_vals):
+                raise ValueError("Invalid characters in expression")
+            value = eval(expr_with_vals, {"__builtins__": None}, {})
+            if not isinstance(value, int) and not isinstance(value, float):
+                raise ValueError("Expression did not evaluate to number")
+            return int(value)
+        except Exception as e:
+            raise ValueError(f"Invalid expression '{expr}': {e}")
+
+    def eval_condition(self, cond: str) -> bool:
+        """
+        Evaluate a simple condition with variables and comparison operators.
+        Supported operators: ==, !=, >=, <=, >, <
+        """
+        ops = ['==', '!=', '>=', '<=', '>', '<']
+        for op in ops:
+            if op in cond:
+                left, right = cond.split(op)
+                left_val = self.eval_expr(left.strip())
+                right_val = self.eval_expr(right.strip())
+                return {
+                    '==': left_val == right_val,
+                    '!=': left_val != right_val,
+                    '>=': left_val >= right_val,
+                    '<=': left_val <= right_val,
+                    '>': left_val > right_val,
+                    '<': left_val < right_val,
+                }[op]
+        raise ValueError(f"Unsupported or invalid condition '{cond}'")
+
+    def process_line(self, line: str) -> None:
+        """
+        Process a single line of code: let declaration or if condition.
+        """
+        line = line.strip()
+        if line.startswith("let "):
+            # let var = expr
+            m = re.match(r'let\s+([a-zA-Z_]\w*)\s*=\s*(.+)', line)
+            if not m:
+                raise ValueError(f"Invalid let statement syntax: '{line}'")
+            var, expr = m.group(1), m.group(2)
+            val = self.eval_expr(expr)
+            self.vars[var] = val
+        elif line.startswith("if "):
+            # if condition: (must be handled externally)
+            raise NotImplementedError("Standalone 'if' statement should be handled externally")
+        else:
+            raise ValueError(f"Unknown statement: '{line}'")
+
+    def run(self, code_lines: List[str]) -> None:
+        """
+        Run lines of code with possible if-blocks.
+        Example:
+          let x = 5
+          if x > 3:
+            let y = x + 10
+        """
+        i = 0
+        n = len(code_lines)
+        while i < n:
+            line = code_lines[i].strip()
+            if line.startswith("if "):
+                # parse condition and block lines
+                m = re.match(r"if\s+(.+):", line)
+                if not m:
+                    raise ValueError(f"Invalid if syntax: '{line}'")
+                cond = m.group(1).strip()
+                cond_result = self.eval_condition(cond)
+
+                # Collect block indented lines:
+                block_lines = []
+                i += 1
+                while i < n and (code_lines[i].startswith(" ") or code_lines[i].startswith("\t")):
+                    block_lines.append(code_lines[i].lstrip())
+                    i += 1
+                if cond_result:
+                    self.run(block_lines)
+            else:
+                self.process_line(line)
+                i += 1
+
+def print_header():
+    h = " Mini Interpreter: let declarations and if conditions "
+    print("\n" + "="*len(h))
+    print(h)
+    print("="*len(h)+"\n")
+
+def print_result(success: bool, vars: Dict[str,int], error_msg: str = ""):
+    width = 70
+    RESET = "\033[0m"
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    is_tty = hasattr(__import__('sys').stdout, 'isatty') and __import__('sys').stdout.isatty()
+
+    top = "╔" + "═"*(width-2) + "╗"
+    bottom = "╚" + "═"*(width-2) + "╝"
+
+    if success:
+        msg = "Execution successful! Variables state:"
+        content = "\n".join(f"  {k} = {v}" for k, v in vars.items()) if vars else "  (no variables defined)"
+        icon = "✅"
+        color = GREEN
+    else:
+        msg = f"Error: {error_msg}"
+        content = ""
+        icon = "❌"
+        color = RED
+
+    padding_msg = (width - 2 - len(msg) - 2)//2
+    line_msg = "║" + " "*padding_msg + f"{icon} {msg}" + " "*(width - 2 - len(msg) - 2 - padding_msg) + "║"
+
+    if is_tty:
+        print(color + top)
+        print(line_msg)
+        print(bottom)
+        if content:
+            print(content)
+        print(RESET)
+    else:
+        print(top)
+        print(line_msg)
+        print(bottom)
+        if content:
+            print(content)
+
+def main():
+    print_header()
+    print("Enter your code lines. Use 'let' to declare variables, and 'if' for conditionals.")
+    print("Indent lines under 'if' by spaces or tabs. End input with an empty line.\n")
+
+    code_lines = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+        if line.strip() == "":
+            break
+        code_lines.append(line)
+
+    interpreter = MiniInterpreter()
+    try:
+        interpreter.run(code_lines)
+        print_result(True, interpreter.vars)
+    except Exception as e:
+        print_result(False, {}, str(e))
+
+if __name__ == "__main__":
+    main()
